@@ -6,6 +6,7 @@ import pipes
 import platform
 import re
 import subprocess
+import math
 
 from ffprobe3.exceptions import FFProbeError
 
@@ -75,9 +76,8 @@ class FFStream:
 
     def __init__(self, data_lines):
         for a in data_lines:
-            kvPair = a.strip().split('=')
-            if len(kvPair) > 1 :
-                self.__dict__[kvPair[0]] = kvPair[1]
+            (key, val) = a.strip().split('=')
+            self.__dict__[key] = val
 
     def is_audio(self):
         """
@@ -143,11 +143,34 @@ class FFStream:
         """
         frame_count = 0
         if self.is_video() or self.is_audio():
-            if self.__dict__['nb_frames']:
-                try:
+            try:
+                if self.__dict__['nb_frames'] != "N/A":
                     frame_count = int(self.__dict__['nb_frames'])
-                except ValueError:
-                    raise FFProbeError('None integer frame count')
+                elif self.__dict__['TAG:DURATION']:
+                    # print(self.__dict__['TAG:DURATION'])
+                    match = re.search("^(?:00|(\d\d)):?(?:00|(\d\d)):?(?:00|(\d\d))\.(\d+)", self.__dict__['TAG:DURATION'])
+                    if match:
+                        # 00:03:50.070000000
+                        if match.group(1):
+                            hours = match.group(1)
+                            frame_count += int(hours) * 60 * 60
+                        if match.group(2):
+                            mins = match.group(2)
+                            frame_count += int(mins) * 60
+                        if match.group(3):
+                            seconds = match.group(3)
+                            frame_count += int(seconds)
+
+                        fps = self.get_r_frame_rate()
+                        frame_count = frame_count * fps
+
+                        # if match.group(4):
+                        #     frame_count += int(match.group(4))
+
+                else:
+                    raise ValueError
+            except ValueError:
+                raise FFProbeError('None integer frame count')
         return frame_count
 
     def duration_seconds(self):
@@ -157,11 +180,16 @@ class FFStream:
         """
         duration = 0.0
         if self.is_video() or self.is_audio():
-            if self.__dict__['duration']:
-                try:
+            try:
+                if self.__dict__['duration'] != "N/A":
                     duration = float(self.__dict__['duration'])
-                except ValueError:
-                    raise FFProbeError('None numeric duration')
+                else:
+                    fps = self.get_avg_frame_rate()
+                    framenumbers = self.frames()
+                    duration = float(framenumbers / fps)
+
+            except ValueError:
+                raise FFProbeError('None numeric duration')
         return duration
 
     def language(self):
@@ -210,4 +238,56 @@ class FFStream:
                 b = int(self.__dict__['bit_rate'])
             except ValueError:
                 raise FFProbeError('None integer bit_rate')
+        return b
+
+    def get_r_frame_rate(self):
+        """
+        Returns r_frame_rateas a str or float
+
+        :param integer: bool
+        :return: float
+        """
+        # return self.__dict__['r_frame_rate']
+        try:
+            if self.__dict__['r_frame_rate']:
+                match = re.search("(\d+)(?:/(\d+))?", self.__dict__['r_frame_rate'])
+                if match:
+                    if match.group(1):
+                        b = float(match.group(1))
+                        if match.group(2):
+                            b = b / float(match.group(2))
+                            # b = round(b, 4)
+                    else:
+                        raise ValueError
+                else:
+                    b = float(self.__dict__['r_frame_rate'])
+
+        except ValueError:
+            raise FFProbeError('Nothing useful in r_frame_rate')
+
+        return b
+
+    def get_avg_frame_rate(self):
+        """
+        Returns avg_frame_rate
+        :return: float
+        """
+        try:
+            if self.__dict__['avg_frame_rate']:
+                match = re.search("(\d+)(?:/(\d+))?", self.__dict__['avg_frame_rate'])
+                if match:
+                    if match.group(1):
+                        b = float(match.group(1))
+                        if match.group(2):
+                            b = b / float(match.group(2))
+                            # b = round(b, 4)
+                    else:
+                        raise ValueError
+                else:
+                    b = float(self.__dict__['avg_frame_rate'])
+            else:
+                raise ValueError
+        except ValueError:
+            raise FFProbeError('Nothing useful in r_frame_rate')
+
         return b
